@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#122a2a">
+  <meta name="description" content="A campus community for reuniting people with the things they have lost.">
+  <title>Foundry — Campus Lost &amp; Found</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="announcement"><span class="announcement-dot"></span> A little kindness can bring something important home.</div>
+  <header class="site-header">
+    <a class="brand" href="#/" aria-label="Foundry home"><span class="brand-mark">f</span><span>foundry<span class="brand-period">.</span><small>CAMPUS LOST &amp; FOUND</small></span></a>
+    <button class="menu-toggle" id="menu-toggle" aria-label="Toggle navigation" aria-expanded="false"><span></span><span></span></button>
+    <nav class="main-nav" id="main-nav" aria-label="Main navigation">
+      <a href="#/" data-nav="home">Explore</a>
+      <a href="#/report/lost" data-nav="report">Report an item</a>
+      <a href="#/dashboard" data-nav="dashboard" class="auth-link">My dashboard</a>
+      <a href="#/claims" data-nav="claims" class="auth-link">My claims</a>
+      <a href="#/admin" data-nav="admin" class="auth-link admin-link">Admin</a>
+      <a href="#/login" data-nav="login" class="guest-link">Log in</a>
+      <a href="#/register" data-nav="register" class="button button-dark nav-join guest-link">Join the community <span>↗</span></a>
+      <button class="button button-dark auth-link" id="logout-button" type="button">Log out <span>↗</span></button>
+    </nav>
+  </header>
+  <main id="app" tabindex="-1"><div class="page-loading">Loading Foundry…</div></main>
+  <footer class="site-footer"><div class="footer-main"><a class="brand brand-light" href="#/"><span class="brand-mark">f</span><span>foundry<span class="brand-period">.</span><small>LOOKING OUT FOR EACH OTHER</small></span></a><p>Good things find their way home.<br>A little help from our campus community goes a long way.</p><a class="footer-report" href="#/report/lost">Have something to report? <span>Start here ↗</span></a></div><div class="footer-bottom"><span>Made for the moments we look out for each other.</span><span>Campus Lost &amp; Found Portal</span></div></footer>
+  <div class="toast-region" id="toast-region" role="status" aria-live="polite"></div>
+</body>
+</html>
