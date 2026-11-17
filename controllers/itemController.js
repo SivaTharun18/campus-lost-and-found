@@ -203,32 +203,46 @@ export const updateItem = async (req, res) => {
 
 // Delete an Item
 export const deleteItem = async (req, res) => {
+    const client = await pool.connect();
+    let transactionOpen = false;
     try {
         const { id } = req.params;
-
-        const result = await pool.query(
-            `DELETE FROM items
-             WHERE item_id = $1 AND user_id = $2
-             RETURNING *`,
-            [id, req.user.user_id]
+        await client.query('BEGIN');
+        transactionOpen = true;
+        const itemResult = await client.query(
+            'SELECT user_id, status FROM items WHERE item_id = $1 FOR UPDATE', [id]
         );
-
-        if (result.rows.length === 0) {
-            return res.status(404).json({
-                message: 'Item not found or you are not authorized to delete it'
-            });
+        const item = itemResult.rows[0];
+        if (!item) {
+            await client.query('ROLLBACK'); transactionOpen = false;
+            return res.status(404).json({ message: 'Item not found' });
         }
-
-        res.json({
-            message: 'Item deleted successfully!'
-        });
+        if (String(item.user_id) !== String(req.user.user_id) && req.user.role !== 'admin') {
+            await client.query('ROLLBACK'); transactionOpen = false;
+            return res.status(403).json({ message: 'You are not authorized to delete this item' });
+        }
+        if (item.status === 'claimed') {
+            await client.query('ROLLBACK'); transactionOpen = false;
+            return res.status(409).json({ message: 'Claimed items cannot be deleted or archived' });
+        }
+        const claims = await client.query('SELECT 1 FROM claims WHERE item_id = $1 LIMIT 1', [id]);
+        if (claims.rows.length) {
+            await client.query("UPDATE items SET status = 'returned' WHERE item_id = $1", [id]);
+            await client.query('COMMIT'); transactionOpen = false;
+            return res.json({ message: 'Item archived. Existing claims and claim history have been preserved.' });
+        }
+        await client.query('DELETE FROM items WHERE item_id = $1', [id]);
+        await client.query('COMMIT'); transactionOpen = false;
+        return res.json({ message: 'Item deleted successfully!' });
 
     } catch (error) {
+        if (transactionOpen) await client.query('ROLLBACK');
         console.error(error);
-
         res.status(500).json({
             message: 'Server error'
         });
+    } finally {
+        client.release();
     }
 };
 
@@ -242,7 +256,7 @@ export const getItemById = async (req, res) => {
             `SELECT items.*, users.name AS reported_by
              FROM items
              JOIN users ON items.user_id = users.user_id
-             WHERE items.item_id = $1`,
+             WHERE items.item_id = $1 AND items.status = 'active'`,
             [id]
         );
 
