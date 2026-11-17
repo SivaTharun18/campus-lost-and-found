@@ -230,7 +230,7 @@ export const deleteItem = async (req, res) => {
             return res.status(409).json({ message: 'Returned or archived items cannot be deleted' });
         }
         const history = await client.query(
-            'SELECT EXISTS (SELECT 1 FROM claims WHERE item_id = $1) OR EXISTS (SELECT 1 FROM found_notifications WHERE item_id = $1) AS has_history',
+            'SELECT EXISTS (SELECT 1 FROM claims WHERE item_id = $1) OR EXISTS (SELECT 1 FROM public.found_notifications WHERE item_id = $1) AS has_history',
             [id]
         );
         if (history.rows[0].has_history) {
@@ -275,7 +275,7 @@ export const markLostItemReturned = async (req, res) => {
             return res.status(409).json({ message: 'Only an active lost item can be marked returned' });
         }
         await client.query("UPDATE items SET status = 'returned' WHERE item_id = $1", [req.params.id]);
-        await client.query("UPDATE found_notifications SET status = 'resolved' WHERE item_id = $1 AND status = 'pending'", [req.params.id]);
+        await client.query("UPDATE public.found_notifications SET status = 'resolved' WHERE item_id = $1 AND status = 'pending'", [req.params.id]);
         await client.query('COMMIT'); open = false;
         return res.json({ message: 'Item marked returned. Found notification history has been preserved.' });
     } catch (error) {

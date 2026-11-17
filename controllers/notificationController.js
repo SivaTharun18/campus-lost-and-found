@@ -30,7 +30,7 @@ export const submitFoundNotification = async (req, res) => {
             return res.status(403).json({ message: 'You cannot notify yourself about your own item' });
         }
         const duplicate = await client.query(
-            "SELECT notification_id FROM found_notifications WHERE item_id = $1 AND finder_id = $2 AND status = 'pending' LIMIT 1",
+            "SELECT notification_id FROM public.found_notifications WHERE item_id = $1 AND finder_id = $2 AND status = 'pending' LIMIT 1",
             [item_id, req.user.user_id]
         );
         if (duplicate.rows.length) {
@@ -38,7 +38,7 @@ export const submitFoundNotification = async (req, res) => {
             return res.status(409).json({ message: 'You already sent a pending notification for this item' });
         }
         const created = await client.query(
-            `INSERT INTO found_notifications (item_id, finder_id, found_location, found_date, description, message)
+            `INSERT INTO public.found_notifications (item_id, finder_id, found_location, found_date, description, message)
              VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
             [item_id, req.user.user_id, found_location.trim(), found_date, description.trim(), message.trim()]
         );
@@ -58,7 +58,7 @@ export const getMyFoundNotifications = async (req, res) => {
                     f.name AS finder_name, f.email AS finder_email,
                     n.found_location, n.found_date, n.description, n.message,
                     n.status, n.created_at
-             FROM found_notifications n
+             FROM public.found_notifications n
              JOIN items i ON i.item_id = n.item_id
              JOIN users f ON f.user_id = n.finder_id
              WHERE i.user_id = $1 AND i.item_type = 'lost'
@@ -87,7 +87,7 @@ export const reviewFoundNotification = async (req, res) => {
     try {
         await client.query('BEGIN'); open = true;
         const reference = await client.query(
-            'SELECT item_id FROM found_notifications WHERE notification_id = $1', [req.params.id]
+            'SELECT item_id FROM public.found_notifications WHERE notification_id = $1', [req.params.id]
         );
         if (!reference.rows.length) {
             await client.query('ROLLBACK'); open = false;
@@ -98,7 +98,7 @@ export const reviewFoundNotification = async (req, res) => {
             [reference.rows[0].item_id]
         );
         const notificationResult = await client.query(
-            'SELECT * FROM found_notifications WHERE notification_id = $1 FOR UPDATE', [req.params.id]
+            'SELECT * FROM public.found_notifications WHERE notification_id = $1 FOR UPDATE', [req.params.id]
         );
         const item = itemResult.rows[0], notification = notificationResult.rows[0];
         if (!item || !notification) {
@@ -114,7 +114,7 @@ export const reviewFoundNotification = async (req, res) => {
             return res.status(409).json({ message: 'Only pending notifications for active Lost items can be reviewed' });
         }
         const updated = await client.query(
-            'UPDATE found_notifications SET status = $1 WHERE notification_id = $2 RETURNING *',
+            'UPDATE public.found_notifications SET status = $1 WHERE notification_id = $2 RETURNING *',
             [status, req.params.id]
         );
         await client.query('COMMIT'); open = false;
