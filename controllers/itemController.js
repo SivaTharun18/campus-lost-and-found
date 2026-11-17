@@ -225,11 +225,18 @@ export const deleteItem = async (req, res) => {
             await client.query('ROLLBACK'); transactionOpen = false;
             return res.status(409).json({ message: 'Claimed items cannot be deleted or archived' });
         }
-        const claims = await client.query('SELECT 1 FROM claims WHERE item_id = $1 LIMIT 1', [id]);
-        if (claims.rows.length) {
-            await client.query("UPDATE items SET status = 'returned' WHERE item_id = $1", [id]);
+        if (item.status === 'returned' || item.status === 'archived') {
+            await client.query('ROLLBACK'); transactionOpen = false;
+            return res.status(409).json({ message: 'Returned or archived items cannot be deleted' });
+        }
+        const history = await client.query(
+            'SELECT EXISTS (SELECT 1 FROM claims WHERE item_id = $1) OR EXISTS (SELECT 1 FROM found_notifications WHERE item_id = $1) AS has_history',
+            [id]
+        );
+        if (history.rows[0].has_history) {
+            await client.query("UPDATE items SET status = 'archived' WHERE item_id = $1", [id]);
             await client.query('COMMIT'); transactionOpen = false;
-            return res.json({ message: 'Item archived. Existing claims and claim history have been preserved.' });
+            return res.json({ message: 'Item archived. Existing claim and notification history has been preserved.' });
         }
         await client.query('DELETE FROM items WHERE item_id = $1', [id]);
         await client.query('COMMIT'); transactionOpen = false;
@@ -244,6 +251,38 @@ export const deleteItem = async (req, res) => {
     } finally {
         client.release();
     }
+};
+
+// The owner of a lost report confirms its physical return.
+export const markLostItemReturned = async (req, res) => {
+    const client = await pool.connect();
+    let open = false;
+    try {
+        await client.query('BEGIN'); open = true;
+        const item = await client.query(
+            'SELECT user_id, item_type, status FROM items WHERE item_id = $1 FOR UPDATE', [req.params.id]
+        );
+        if (!item.rows.length) {
+            await client.query('ROLLBACK'); open = false;
+            return res.status(404).json({ message: 'Item not found' });
+        }
+        if (String(item.rows[0].user_id) !== String(req.user.user_id)) {
+            await client.query('ROLLBACK'); open = false;
+            return res.status(403).json({ message: 'Only the item owner can confirm its return' });
+        }
+        if (item.rows[0].item_type !== 'lost' || item.rows[0].status !== 'active') {
+            await client.query('ROLLBACK'); open = false;
+            return res.status(409).json({ message: 'Only an active lost item can be marked returned' });
+        }
+        await client.query("UPDATE items SET status = 'returned' WHERE item_id = $1", [req.params.id]);
+        await client.query("UPDATE found_notifications SET status = 'resolved' WHERE item_id = $1 AND status = 'pending'", [req.params.id]);
+        await client.query('COMMIT'); open = false;
+        return res.json({ message: 'Item marked returned. Found notification history has been preserved.' });
+    } catch (error) {
+        if (open) await client.query('ROLLBACK');
+        console.error(error);
+        return res.status(500).json({ message: 'Server error' });
+    } finally { client.release(); }
 };
 
 

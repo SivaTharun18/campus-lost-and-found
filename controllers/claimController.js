@@ -17,9 +17,9 @@ export const submitClaim = async (req, res) => {
         try {
             await client.query('BEGIN');
             const item = await client.query(
-                'SELECT user_id, status FROM items WHERE item_id = $1 FOR UPDATE', [item_id]
+                'SELECT user_id, status, item_type FROM items WHERE item_id = $1 FOR UPDATE', [item_id]
             );
-            if (!item.rows.length || item.rows[0].status !== 'active') {
+            if (!item.rows.length || item.rows[0].status !== 'active' || item.rows[0].item_type !== 'found') {
                 await client.query('ROLLBACK');
                 return res.status(404).json({ message: 'Item not found or unavailable' });
             }
@@ -67,10 +67,13 @@ export const getMyClaims = async (req, res) => {
 
         const result = await pool.query(
             `SELECT claims.*, items.title AS item_title,
-                    items.location, users.name AS claimant_name
+                    items.location, items.status AS item_status,
+                    users.name AS claimant_name,
+                    owner.name AS finder_name, owner.email AS finder_email
              FROM claims
              JOIN items ON claims.item_id = items.item_id
              JOIN users ON claims.claimant_id = users.user_id
+             JOIN users owner ON items.user_id = owner.user_id
              WHERE claims.claimant_id = $1
              ORDER BY claims.created_at DESC`,
             [user_id]
@@ -96,6 +99,7 @@ export const getClaimsReceived = async (req, res) => {
     try {
         const result = await pool.query(
             `SELECT claims.claim_id, claims.item_id, items.title AS item_title,
+                    items.status AS item_status,
                     users.name AS claimant_name, users.email AS claimant_email,
                     claims.message, claims.created_at, claims.status
              FROM claims
@@ -165,7 +169,7 @@ const decideClaim = async ({ id, status, reviewerId, admin = false }, res) => {
         }
 
         const itemResult = await client.query(
-            'SELECT user_id AS owner_id, status AS item_status FROM items WHERE item_id = $1 FOR UPDATE',
+            'SELECT user_id AS owner_id, status AS item_status, item_type FROM items WHERE item_id = $1 FOR UPDATE',
             [reference.rows[0].item_id]
         );
         const claimResult = await client.query(
@@ -183,6 +187,11 @@ const decideClaim = async ({ id, status, reviewerId, admin = false }, res) => {
             await client.query('ROLLBACK');
             transactionOpen = false;
             return res.status(403).json({ message: 'You are not authorized to review this claim' });
+        }
+        if (!admin && item.item_type !== 'found') {
+            await client.query('ROLLBACK');
+            transactionOpen = false;
+            return res.status(409).json({ message: 'Claims can only be reviewed for found items' });
         }
         if (claim.status !== 'pending') {
             await client.query('ROLLBACK');
@@ -236,3 +245,41 @@ export const reviewClaimAsAdmin = async (req, res) => decideClaim({
     reviewerId: req.user.user_id,
     admin: true
 }, res);
+
+// The original finder confirms physical collection after an approved claim.
+export const markClaimCollected = async (req, res) => {
+    const client = await pool.connect();
+    let open = false;
+    try {
+        await client.query('BEGIN'); open = true;
+        const ref = await client.query('SELECT item_id FROM claims WHERE claim_id = $1', [req.params.id]);
+        if (!ref.rows.length) {
+            await client.query('ROLLBACK'); open = false;
+            return res.status(404).json({ message: 'Claim not found' });
+        }
+        const itemResult = await client.query(
+            'SELECT user_id, item_type, status FROM items WHERE item_id = $1 FOR UPDATE', [ref.rows[0].item_id]
+        );
+        const claimResult = await client.query('SELECT * FROM claims WHERE claim_id = $1 FOR UPDATE', [req.params.id]);
+        const item = itemResult.rows[0], claim = claimResult.rows[0];
+        if (!item || !claim) {
+            await client.query('ROLLBACK'); open = false;
+            return res.status(404).json({ message: 'Claim or item not found' });
+        }
+        if (String(item.user_id) !== String(req.user.user_id)) {
+            await client.query('ROLLBACK'); open = false;
+            return res.status(403).json({ message: 'Only the finder who reported this item can confirm collection' });
+        }
+        if (item.item_type !== 'found' || claim.status !== 'approved' || item.status !== 'claimed') {
+            await client.query('ROLLBACK'); open = false;
+            return res.status(409).json({ message: 'Collection can only be confirmed for an approved claim awaiting collection' });
+        }
+        await client.query("UPDATE items SET status = 'returned' WHERE item_id = $1", [claim.item_id]);
+        await client.query('COMMIT'); open = false;
+        return res.json({ message: 'Collection confirmed. The item is marked returned.', claim });
+    } catch (error) {
+        if (open) await client.query('ROLLBACK');
+        console.error(error);
+        return res.status(500).json({ message: 'Server error' });
+    } finally { client.release(); }
+};

@@ -7,6 +7,7 @@ import {
     searchItems,
     updateItem,
     deleteItem,
+    markLostItemReturned,
     getItemById
 } from '../controllers/itemController.js';
 
@@ -28,6 +29,7 @@ router.get('/', getAllItems);
 
 // Update an Item
 router.put('/:id', verifyToken, updateItem);
+router.put('/:id/return', verifyToken, markLostItemReturned);
 
 // Delete an Item
 router.delete('/:id', verifyToken, deleteItem);

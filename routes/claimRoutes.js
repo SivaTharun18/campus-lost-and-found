@@ -6,7 +6,8 @@ import {
     getClaimsReceived,
     reviewClaim,
     getAllClaims,
-    reviewClaimAsAdmin
+    reviewClaimAsAdmin,
+    markClaimCollected
 } from '../controllers/claimController.js';
 
 import { verifyToken } from '../middleware/authMiddleware.js';
@@ -27,5 +28,6 @@ router.put('/admin/:id/review', verifyToken, verifyAdmin, reviewClaimAsAdmin);
 
 // Approve or Reject a Claim
 router.put('/:id/review', verifyToken, reviewClaim);
+router.put('/:id/collected', verifyToken, markClaimCollected);
 
 export default router;

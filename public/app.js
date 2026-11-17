@@ -5,6 +5,10 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp
 const user = () => { try { return JSON.parse(localStorage.getItem(userKey) || 'null'); } catch { return null; } };
 const token = () => localStorage.getItem(tokenKey);
 const loggedIn = () => Boolean(token());
+app.addEventListener('click', event => {
+  const button = event.target.closest('[data-found-item]');
+  if (button) { event.preventDefault(); location.hash = `#/item/${encodeURIComponent(button.dataset.foundItem)}?notify=1`; }
+});
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -22,9 +26,16 @@ function updateNav() { document.querySelectorAll('.auth-link').forEach(el => el.
 function renderPage(html) { app.innerHTML = html; app.focus({ preventScroll: true }); updateNav(); document.querySelector('#main-nav').classList.remove('open'); }
 function shell(title, subtitle, body) { return `<div class="page-wrap"><div class="page-heading"><div class="section-kicker">Foundry community</div><h1>${title}</h1><p>${subtitle}</p></div>${body}</div>`; }
 function empty(title, copy) { return `<div class="empty-state"><strong>${title}</strong>${copy}</div>`; }
+function itemStatusLabel(itemType, status) {
+  if (status === 'archived') return 'Archived';
+  if (status === 'returned') return 'Returned';
+  if (itemType === 'found' && status === 'claimed') return 'Awaiting Collection';
+  return 'Active';
+}
 function itemCard(item) {
   const image = item.image_url ? `<img src="${esc(item.image_url)}" alt="${esc(item.title)}" loading="lazy" onerror="this.remove()">` : '<div class="item-image-placeholder" aria-hidden="true">✳</div>';
-  return `<a class="item-card" href="#/item/${encodeURIComponent(item.item_id)}"><div class="item-image">${image}<span class="item-type ${esc(item.item_type)}">${esc(item.item_type)} item</span></div><div class="item-info"><h3>${esc(item.title)}</h3><div class="item-meta"><span>⌖ ${esc(item.location || 'Location not listed')}</span><span>◷ ${dateLabel(item.item_date || item.created_at)}</span></div><div class="item-byline"><span>${esc(item.category || 'Uncategorized')}</span><span>by ${esc(item.reported_by || 'Campus member')}</span></div></div></a>`;
+  const notifyButton = item.item_type === 'lost' && item.status === 'active' && loggedIn() && String(item.user_id) !== String(user()?.user_id) ? `<button class="button button-outline item-found-action" data-found-item="${esc(item.item_id)}">I Found This Item</button>` : '';
+  return `<article class="item-card"><a href="#/item/${encodeURIComponent(item.item_id)}"><div class="item-image">${image}<span class="item-type ${esc(item.item_type)}">${esc(item.item_type)} item</span></div><div class="item-info"><h3>${esc(item.title)}</h3><div class="item-meta"><span>⌖ ${esc(item.location || 'Location not listed')}</span><span>◷ ${dateLabel(item.item_date || item.created_at)}</span></div><div class="item-byline"><span>${esc(item.category || 'Uncategorized')}</span><span>by ${esc(item.reported_by || 'Campus member')}</span></div></div></a>${notifyButton}</article>`;
 }
 function searchBar(params, includeLocation = false) {
   return `<form class="filter-bar" id="search-form"><label class="search-box"><span>⌕</span><input name="keyword" placeholder="${includeLocation ? 'Search an item or place' : 'Try “blue water bottle” or “student center”'}" value="${esc(params.get('keyword') || '')}"></label>${includeLocation ? `<input class="field" name="location" placeholder="Location" value="${esc(params.get('location') || '')}">` : ''}<select name="item_type" aria-label="Item type"><option value="">${includeLocation ? 'Lost & found' : 'All reports'}</option><option value="lost" ${params.get('item_type') === 'lost' ? 'selected' : ''}>Lost</option><option value="found" ${params.get('item_type') === 'found' ? 'selected' : ''}>Found</option></select><select name="category" aria-label="Category"><option value="">Any category</option>${['Electronics','Bags','Clothing','Keys','Books','Other'].map(x => `<option ${params.get('category') === x ? 'selected' : ''}>${x}</option>`).join('')}</select><button class="button button-dark" type="submit">Search <span>↗</span></button></form>`;
@@ -59,10 +70,29 @@ function renderReport(type) {
   file.addEventListener('change', () => { const chosen = file.files[0]; if (!chosen) return; if (!/^image\/(jpeg|png)$/.test(chosen.type) || chosen.size > 5 * 1024 * 1024) { file.value = ''; toast('Choose a JPG or PNG image under 5 MB.', 'error'); return; } preview.innerHTML = `<img src="${URL.createObjectURL(chosen)}" alt="Selected image preview">`; });
   form.addEventListener('submit', async event => { event.preventDefault(); if (!form.reportValidity()) return; const button = form.querySelector('button'), errorBox = document.querySelector('#form-error'), body = new FormData(form); body.set('item_type', type); errorBox.textContent = ''; errorBox.classList.remove('show'); try { busy(button, true, 'Publishing report…'); const data = await api('/api/items', { method: 'POST', body }); toast(data.message || 'Report published.', 'success'); location.hash = `#/item/${encodeURIComponent(data.item.item_id)}`; } catch (error) { errorBox.textContent = error.message; errorBox.classList.add('show'); } finally { busy(button, false); } });
 }
-async function renderItem(id) {
+async function renderItem(id, params = new URLSearchParams()) {
   renderPage('<div class="page-wrap"><div class="page-loading">Loading item…</div></div>');
   try { const data = await api(`/api/items/${encodeURIComponent(id)}`), item = data.item, image = item.image_url ? `<img src="${esc(item.image_url)}" alt="${esc(item.title)}" onerror="this.remove()">` : '<div class="item-image-placeholder">✳</div>';
-    renderPage(`<div class="page-wrap"><a class="text-link" href="#/browse">← Back to reports</a><div class="detail-layout" style="margin-top:20px"><div class="detail-photo">${image}</div><div class="detail-copy"><span class="item-type ${esc(item.item_type)}">${esc(item.item_type)} item</span><h1>${esc(item.title)}</h1><div class="item-meta"><span>⌖ ${esc(item.location || 'Location not listed')}</span><span>◷ ${dateLabel(item.item_date || item.created_at)}</span></div><p class="detail-desc">${esc(item.description || 'No additional description was provided.')}</p><div class="detail-meta"><div><small>Category</small><strong>${esc(item.category || 'Not specified')}</strong></div><div><small>Reported by</small><strong>${esc(item.reported_by || 'Campus member')}</strong></div><div><small>Reported</small><strong>${dateLabel(item.created_at)}</strong></div><div><small>Status</small><strong>${esc(item.status || 'active')}</strong></div></div>${item.status === 'active' && loggedIn() ? `<form class="claim-box" id="claim-form"><h3>Think it might be yours?</h3><p>Send the item owner a claim. Share details that help them verify it belongs to you.</p><div class="form-field"><label for="claim-message">Message (optional)</label><textarea name="message" id="claim-message" maxlength="2000" placeholder="Describe a detail that identifies this item…"></textarea></div><button class="button button-dark">Send a claim <span>↗</span></button><div class="form-error" id="form-error" role="alert"></div></form>` : item.status === 'active' ? '<div class="claim-box"><h3>Want to claim this item?</h3><p>Log in to send a message to the person who reported it.</p><a class="button button-dark" href="#/login">Log in to claim <span>↗</span></a></div>' : ''}</div></div></div>`);
+    renderPage(`<div class="page-wrap"><a class="text-link" href="#/browse">← Back to reports</a><div class="detail-layout" style="margin-top:20px"><div class="detail-photo">${image}</div><div class="detail-copy"><span class="item-type ${esc(item.item_type)}">${esc(item.item_type)} item</span><h1>${esc(item.title)}</h1><div class="item-meta"><span>⌖ ${esc(item.location || 'Location not listed')}</span><span>◷ ${dateLabel(item.item_date || item.created_at)}</span></div><p class="detail-desc">${esc(item.description || 'No additional description was provided.')}</p><div class="detail-meta"><div><small>Category</small><strong>${esc(item.category || 'Not specified')}</strong></div><div><small>Reported by</small><strong>${esc(item.reported_by || 'Campus member')}</strong></div><div><small>Reported</small><strong>${dateLabel(item.created_at)}</strong></div><div><small>Status</small><strong>${itemStatusLabel(item.item_type, item.status)}</strong></div></div>${item.status === 'active' && loggedIn() ? `<form class="claim-box" id="claim-form"><h3>Think it might be yours?</h3><p>Send the item owner a claim. Share details that help them verify it belongs to you.</p><div class="form-field"><label for="claim-message">Message (optional)</label><textarea name="message" id="claim-message" maxlength="2000" placeholder="Describe a detail that identifies this item…"></textarea></div><button class="button button-dark">Send a claim <span>↗</span></button><div class="form-error" id="form-error" role="alert"></div></form>` : item.status === 'active' ? '<div class="claim-box"><h3>Want to claim this item?</h3><p>Log in to send a message to the person who reported it.</p><a class="button button-dark" href="#/login">Log in to claim <span>↗</span></a></div>' : ''}</div></div></div>`);
+    if (item.item_type === 'found' && String(item.user_id) === String(user()?.user_id)) document.querySelector('#claim-form')?.remove();
+    if (item.item_type === 'lost') {
+      document.querySelector('#claim-form')?.remove();
+      if (item.status === 'active' && loggedIn() && String(item.user_id) !== String(user()?.user_id)) {
+        const panel = document.createElement('div'); panel.className = 'claim-box';
+        panel.innerHTML = '<h3>I Found This Item</h3><p>Tell the student who lost it where and when you found it.</p><button type="button" class="button button-dark" id="show-found-notification">Send Found Notification</button>';
+        document.querySelector('.detail-copy').append(panel);
+        panel.querySelector('button').addEventListener('click', () => {
+          panel.innerHTML = `<h3>Found notification</h3><form id="found-notification-form" class="form-stack"><div class="form-field"><label>Where did you find it? *</label><input name="found_location" required maxlength="250"></div><div class="form-field"><label>When did you find it? *</label><input name="found_date" type="date" required max="${new Date().toISOString().slice(0,10)}"></div><div class="form-field"><label>Description or identifying details *</label><textarea name="description" required maxlength="2000"></textarea></div><div class="form-field"><label>Message to the student *</label><textarea name="message" required maxlength="2000"></textarea></div><div class="form-error" role="alert"></div><button class="button button-dark">Send notification</button></form>`;
+          panel.querySelector('form').addEventListener('submit', async event => {
+            event.preventDefault(); const form = event.currentTarget, button = form.querySelector('button'), error = form.querySelector('.form-error');
+            if (!form.reportValidity()) return;
+            try { busy(button, true, 'Sending…'); const result = await api('/api/notifications', { method: 'POST', body: JSON.stringify({ item_id: item.item_id, ...Object.fromEntries(new FormData(form)) }) }); toast(result.message, 'success'); panel.remove(); }
+            catch (err) { error.textContent = err.message; error.classList.add('show'); } finally { busy(button, false); }
+          });
+        });
+        if (params.get('notify') === '1') panel.querySelector('button').click();
+      }
+    }
     document.querySelector('#claim-form')?.addEventListener('submit', async event => { event.preventDefault(); const form = event.currentTarget, button = form.querySelector('button'), errorBox = document.querySelector('#form-error'); try { busy(button, true, 'Sending claim…'); const result = await api('/api/claims', { method: 'POST', body: JSON.stringify({ item_id: item.item_id, message: form.elements.message.value.trim() || null }) }); toast(result.message || 'Claim sent.', 'success'); location.hash = '#/claims'; } catch (error) { errorBox.textContent = error.message; errorBox.classList.add('show'); } finally { busy(button, false); } });
   } catch (error) { renderPage(shell('Item unavailable', 'This report may have been removed or is no longer available.', `<div class="notice">${esc(error.message)} <a class="text-link" href="#/browse">Browse all reports ↗</a></div>`)); }
 }
@@ -70,20 +100,83 @@ async function renderDashboard() {
   if (!loggedIn()) { location.hash = '#/login'; return; }
   renderPage('<div class="page-wrap"><div class="page-loading">Loading your dashboard…</div></div>');
   try {
-    const [data, publicData, receivedData] = await Promise.all([api('/api/dashboard'), api('/api/items'), api('/api/claims/received')]);
+    const [data, publicData, receivedData, notificationResult] = await Promise.all([
+      api('/api/dashboard'), api('/api/items'), api('/api/claims/received'),
+      api('/api/notifications/received').then(value => ({ value })).catch(error => ({ error }))
+    ]);
+    const notificationData = notificationResult.value || { notifications: [] };
     const s = data.statistics || [], name = user()?.name?.split(' ')[0], userId = String(user()?.user_id);
     const ownItems = new Map((data.recent_items || []).map(item => [String(item.item_id), item]));
     (publicData.items || []).filter(item => String(item.user_id) === userId).forEach(item => ownItems.set(String(item.item_id), item));
     const items = [...ownItems.values()].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
     const received = receivedData.claims || [];
     renderPage(shell(`Good to see you${name ? `, ${esc(name)}` : ''}.`, 'Here’s what’s happening with your campus reports.', `<div class="dashboard-grid"><div class="stat-card"><span>Your reports</span><strong>${Number(s.total_items || 0)}</strong><small>All time</small></div><div class="stat-card"><span>Lost items</span><strong>${Number(s.lost_items || 0)}</strong><small>Reports shared</small></div><div class="stat-card"><span>Found items</span><strong>${Number(s.found_items || 0)}</strong><small>Good finds</small></div><div class="stat-card"><span>Your claims</span><strong>${Number(s.total_claims || 0)}</strong><small>Submitted</small></div></div><div class="dashboard-columns"><section class="panel owned-panel"><h2>Your reported items</h2><p class="panel-sub">Manage your reports. Active items and your five latest reports are shown.</p><div class="table-list" id="owned-items">${items.length ? items.map(item => `<div class="list-row owned-row"><span class="owned-title"><a href="#/item/${encodeURIComponent(item.item_id)}"><strong>${esc(item.title)}</strong></a><small>${esc(item.item_type)} · ${esc(item.location || 'Location not listed')}</small></span><span class="status ${esc(item.status || 'active')}">${esc(item.status || 'active')}</span><span class="row-actions"><a class="button button-outline" href="#/edit/${encodeURIComponent(item.item_id)}">Edit</a><button class="button button-danger" type="button" data-delete-item="${esc(item.item_id)}" data-item-title="${esc(item.title)}">Delete</button></span></div>`).join('') : empty('No reports yet', 'If you lost or found something, let the community know. <a href="#/report/lost"><strong>Make your first report ↗</strong></a>')}</div></section><section class="panel"><h2>Quick actions</h2><p class="panel-sub">Pick up where you need to.</p><div class="table-list"><a class="list-row" href="#/report/lost"><span><strong>Report a lost item</strong><small>Tell the community what you’re looking for.</small></span><span>↗</span></a><a class="list-row" href="#/report/found"><span><strong>Report a found item</strong><small>Help an item find its owner.</small></span><span>↗</span></a><a class="list-row" href="#/claims"><span><strong>View your claims</strong><small>Check your claim history.</small></span><span>↗</span></a></div></section></div><section class="panel admin-claims-panel"><h2>Claims Received</h2><p class="panel-sub">Review claims submitted for found items you reported.</p><div class="admin-claim-list">${received.length ? received.map(claim => `<article class="admin-claim"><div class="admin-claim-main"><div class="admin-claim-heading"><div><span class="section-kicker">Claim #${esc(claim.claim_id)}</span><h3>${esc(claim.item_title)}</h3></div><span class="status ${esc(claim.status)}">${esc(claim.status)}</span></div><div class="admin-claim-details"><div><small>Claimant</small><strong>${esc(claim.claimant_name)}</strong><a href="mailto:${encodeURIComponent(claim.claimant_email || '')}">${esc(claim.claimant_email || '')}</a></div><div><small>Submitted</small><strong>${dateLabel(claim.created_at)}</strong></div></div><div class="admin-claim-message"><small>Claim message</small><p>${claim.message ? esc(claim.message) : '<span class="muted">No message provided.</span>'}</p></div></div>${claim.status === 'pending' ? `<div class="admin-claim-actions"><button class="button button-lime" data-owner-decision="approved" data-claim-id="${esc(claim.claim_id)}">Approve</button><button class="button button-outline" data-owner-decision="rejected" data-claim-id="${esc(claim.claim_id)}">Reject</button></div>` : ''}</article>`).join('') : empty('No claims received', 'Claims on your found items will appear here.')}</div></section>`));
+    document.querySelectorAll('#owned-items .owned-row').forEach((row, index) => {
+      const item = items[index];
+      const status = row.querySelector('.status');
+      if (status) status.textContent = itemStatusLabel(item.item_type, item.status);
+      if (['claimed', 'returned', 'archived'].includes(item.status)) row.querySelector('[data-delete-item]')?.remove();
+      if (item.item_type === 'lost' && item.status === 'active') {
+        row.querySelector('.row-actions')?.insertAdjacentHTML('afterbegin', `<button class="button button-outline" data-return-lost="${esc(item.item_id)}">Mark Returned</button>`);
+      }
+    });
+    const notificationPanel = document.createElement('section');
+    notificationPanel.className = 'panel admin-claims-panel';
+    const notes = notificationData.notifications || [];
+    notificationPanel.innerHTML = `<h2>Found Notifications</h2><p class="panel-sub">Contact the finder and arrange collection. Mark your Lost report returned after you physically collect it.</p>${notificationResult.error ? `<div class="notice">Found Notifications are temporarily unavailable. Restart the local server to load this section.</div>` : notes.length ? `<div class="admin-claim-list">${notes.map(note => `<article class="admin-claim"><div class="admin-claim-main"><div class="admin-claim-heading"><div><span class="section-kicker">Found notification</span><h3>${esc(note.item_title)}</h3></div><span class="status ${esc(note.status)}">${esc(note.status)}</span></div><div class="admin-claim-details"><div><small>Found by</small><strong>${esc(note.finder_name)}</strong><a href="mailto:${encodeURIComponent(note.finder_email)}">${esc(note.finder_email)}</a></div><div><small>Found location and date</small><strong>${esc(note.found_location)} · ${dateLabel(note.found_date)}</strong></div></div><div class="admin-claim-message"><small>Description</small><p>${esc(note.description)}</p><small>Message</small><p>${esc(note.message)}</p></div></div><a class="button button-outline" href="mailto:${encodeURIComponent(note.finder_email)}?subject=${encodeURIComponent(`About ${note.item_title}`)}">Contact Finder</a></article>`).join('')}</div>` : empty('No found notifications', 'Finder notifications for your Lost items will appear here.')}`;
+    document.querySelector('.page-wrap')?.append(notificationPanel);
+    notificationPanel.querySelectorAll('.admin-claim').forEach((card, index) => {
+      const note = notes[index];
+      if (!note || note.status !== 'pending') return;
+      const actions = document.createElement('div');
+      actions.className = 'admin-claim-actions';
+      actions.innerHTML = `<button class="button button-lime" type="button" data-notification-decision="approved">Approve</button><button class="button button-outline" type="button" data-notification-decision="rejected">Reject</button>`;
+      card.append(actions);
+    });
+    notificationPanel.addEventListener('click', async event => {
+      const button = event.target.closest('[data-notification-decision]');
+      if (!button) return;
+      const card = button.closest('.admin-claim'), note = notes[[...notificationPanel.querySelectorAll('.admin-claim')].indexOf(card)];
+      if (!note || note.status !== 'pending') return;
+      const decision = button.dataset.notificationDecision;
+      if (!confirm(`${decision === 'approved' ? 'Approve' : 'Reject'} this found notification?`)) return;
+      card.querySelectorAll('[data-notification-decision]').forEach(action => { action.disabled = true; });
+      try {
+        const result = await api(`/api/notifications/${encodeURIComponent(note.notification_id)}/review`, {
+          method: 'PUT', body: JSON.stringify({ status: decision })
+        });
+        toast(result.message, 'success');
+        await renderDashboard();
+      } catch (error) {
+        toast(error.message, 'error');
+        card.querySelectorAll('[data-notification-decision]').forEach(action => { action.disabled = false; });
+      }
+    });
+    received.forEach(claim => {
+      if (claim.status !== 'approved' || claim.item_status !== 'claimed') return;
+      const article = [...document.querySelectorAll('.admin-claim')].find(node => node.textContent.includes(`Claim #${claim.claim_id}`));
+      article?.insertAdjacentHTML('beforeend', `<button class="button button-lime" data-mark-collected="${esc(claim.claim_id)}">Mark as Collected</button><p class="panel-sub">Awaiting Collection</p>`);
+    });
     document.querySelector('#owned-items')?.addEventListener('click', async event => {
+      const returned = event.target.closest('[data-return-lost]');
+      if (returned) {
+        if (!confirm('Confirm that you physically collected this Lost item?')) return;
+        try { const result = await api(`/api/items/${encodeURIComponent(returned.dataset.returnLost)}/return`, { method: 'PUT' }); toast(result.message, 'success'); await renderDashboard(); }
+        catch (error) { toast(error.message, 'error'); }
+        return;
+      }
       const button = event.target.closest('[data-delete-item]');
       if (!button) return;
-      if (!window.confirm(`Delete “${button.dataset.itemTitle}”? This action cannot be undone.`)) return;
+      if (!window.confirm(`Delete “${button.dataset.itemTitle}”? Items with claim or notification history will be archived.`)) return;
       button.disabled = true;
       try { const result = await api(`/api/items/${encodeURIComponent(button.dataset.deleteItem)}`, { method: 'DELETE' }); toast(result.message || 'Item deleted.', 'success'); await renderDashboard(); }
       catch (error) { button.disabled = false; toast(error.message, 'error'); }
+    });
+    document.querySelector('.page-wrap')?.addEventListener('click', async event => {
+      const button = event.target.closest('[data-mark-collected]');
+      if (!button || !confirm('Confirm the claimant physically collected this item?')) return;
+      try { const result = await api(`/api/claims/${encodeURIComponent(button.dataset.markCollected)}/collected`, { method: 'PUT' }); toast(result.message, 'success'); await renderDashboard(); }
+      catch (error) { toast(error.message, 'error'); }
     });
     document.querySelector('.admin-claims-panel')?.addEventListener('click', async event => {
       const button = event.target.closest('[data-owner-decision]');
@@ -120,7 +213,10 @@ async function renderEditItem(id) {
 async function renderClaims() {
   if (!loggedIn()) { location.hash = '#/login'; return; }
   renderPage('<div class="page-wrap"><div class="page-loading">Loading your claims…</div></div>');
-  try { const data = await api('/api/claims/my-claims'), claims = data.claims || []; renderPage(shell('My claims', 'Follow up on the items you’ve reached out about.', `<div class="panel"><h2>Claim history</h2><p class="panel-sub">Your submitted claims and their current status.</p><div class="table-list">${claims.length ? claims.map(claim => `<div class="list-row"><span><a href="#/item/${encodeURIComponent(claim.item_id)}"><strong>${esc(claim.item_title || `Item ${claim.item_id}`)}</strong></a><small>${esc(claim.location || 'Location not listed')} · ${dateLabel(claim.created_at)}</small>${claim.message ? `<small style="display:block;margin-top:5px">“${esc(claim.message)}”</small>` : ''}</span><span class="status ${esc(claim.status)}">${esc(claim.status)}</span></div>`).join('') : empty('No claims yet', 'When you recognize an item, open its report and send the owner a claim.')}</div></div>`)); }
+  try {
+    const data = await api('/api/claims/my-claims'), claims = data.claims || [];
+    renderPage(shell('My claims', 'After approval, contact the finder to arrange collection.', `<div class="panel"><h2>Claim history</h2><p class="panel-sub">Your submitted claims and their current status.</p><div class="table-list">${claims.length ? claims.map(claim => `<div class="list-row"><span><strong>${esc(claim.item_title || `Item ${claim.item_id}`)}</strong><small>${esc(claim.location || 'Location not listed')} · ${dateLabel(claim.created_at)}</small>${claim.message ? `<small style="display:block;margin-top:5px">“${esc(claim.message)}”</small>` : ''}${claim.status === 'approved' ? `<small style="display:block;margin-top:7px">Finder: ${esc(claim.finder_name)} · ${esc(claim.item_status === 'claimed' ? 'Awaiting Collection' : 'Collected')}</small><a class="text-link" href="mailto:${encodeURIComponent(claim.finder_email)}?subject=${encodeURIComponent(`About ${claim.item_title}`)}">Contact Finder (${esc(claim.finder_email)})</a>` : ''}</span><span class="status ${esc(claim.status)}">${esc(claim.status)}</span></div>`).join('') : empty('No claims yet', 'When you recognize a found item, open its report and send the finder a claim.')}</div></div>`));
+  }
   catch (error) { renderPage(shell('My claims', 'We couldn’t load your claim history.', `<div class="notice">${esc(error.message)}</div>`)); }
 }
 function renderReview() {
@@ -175,7 +271,7 @@ async function render() {
   if (route === 'register') return renderAuth(true);
   if (route === 'report') return renderReport(args[0] === 'found' ? 'found' : 'lost');
   if (route === 'edit') return renderEditItem(args[0]);
-  if (route === 'item') return renderItem(args[0]);
+  if (route === 'item') return renderItem(args[0], params);
   if (route === 'dashboard') return renderDashboard();
   if (route === 'claims') return renderClaims();
   if (route === 'review') return renderReview();

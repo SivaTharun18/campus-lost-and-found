@@ -5,6 +5,7 @@ import itemRoutes from './routes/itemRoutes.js';
 import claimRoutes from './routes/claimRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
+import notificationRoutes from './routes/notificationRoutes.js';
 
 const app = express();
 
@@ -14,6 +15,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/claims', claimRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/notifications', notificationRoutes);
 // Serve uploaded images
 app.use('/uploads', express.static('uploads'));
 app.use(express.static('public'));
